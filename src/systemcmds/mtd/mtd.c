@@ -193,17 +193,18 @@ ramtron_attach(void)
 	/* initialize the right spi */
 	struct spi_dev_s *spi = px4_spibus_initialize(PX4_SPI_BUS_RAMTRON);
 
+	if (spi == NULL) {
+		errx(1, "failed to locate spi bus");
+	}
+
 	/* this resets the spi bus, set correct bus speed again */
 	SPI_SETFREQUENCY(spi, 10 * 1000 * 1000);
 	SPI_SETBITS(spi, 8);
 	SPI_SETMODE(spi, SPIDEV_MODE3);
 	SPI_SELECT(spi, SPIDEV_FLASH(0), false);
 
-	if (spi == NULL) {
-		errx(1, "failed to locate spi bus");
-	}
-
 	/* start the RAMTRON driver, attempt 5 times */
+
 	for (int i = 0; i < 5; i++) {
 		mtd_dev = ramtron_initialize(spi);
 
