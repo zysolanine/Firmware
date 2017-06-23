@@ -19,6 +19,10 @@ else
 			if mpl3115a2 -I start
 			then
 			fi
+			# Internal SPI
+			if fxos8700cq start -a 8 -R 0
+			then
+			fi
 		else
 			if ver hwcmp CRAZYFLIE
 			then
