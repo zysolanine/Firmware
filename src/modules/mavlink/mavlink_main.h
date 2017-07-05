@@ -466,6 +466,7 @@ private:
 	static const unsigned MAVLINK_MAX_INSTANCES = 4;
 	mavlink_message_t _mavlink_buffer;
 	mavlink_status_t _mavlink_status;
+	mavlink_signing_t _mavlink_signing;
 
 	/* states */
 	bool			_hil_enabled;		/**< Hardware In the Loop mode */

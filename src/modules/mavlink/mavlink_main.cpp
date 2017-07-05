@@ -104,6 +104,26 @@
 //#define MAVLINK_PRINT_PACKETS
 
 static Mavlink *_mavlink_instances = nullptr;
+static mavlink_signing_streams_t global_mavlink_signig_streams = {};
+
+// magic for versioning of the structure
+#define SIGNING_KEY_MAGIC 0x3852fcd1
+
+// structure stored in persistent memory
+typedef struct {
+	uint32_t magic;
+	uint64_t timestamp;
+	uint8_t secret_key[32];
+} signing_key_t;
+
+static const signing_key_t mavlink_secret_key = {
+	SIGNING_KEY_MAGIC,
+	1420070400, // 1st January 2015
+	{
+		0xce, 0x39, 0x7e, 0x07, 0x27, 0x6c, 0xc8, 0xa1, 0xd9, 0x88, 0x76, 0x92, 0x8a, 0x9a, 0xab, 0xbb,
+		0x72, 0x7b, 0x9f, 0xbe, 0xee, 0xb7, 0x32, 0x71, 0xc6, 0x0c, 0x9c, 0xa1, 0x8a, 0x16, 0x14, 0xe3
+	}
+};
 
 /**
  * mavlink app start / stop handling function
@@ -202,6 +222,28 @@ mavlink_message_t *mavlink_get_channel_buffer(uint8_t channel)
 	}
 }
 
+static const uint32_t accept_list[] = {
+	MAVLINK_MSG_ID_RADIO_STATUS
+};
+
+// set default_tunes array size
+const unsigned int accept_list_size = sizeof(accept_list) / sizeof(accept_list[0]);
+
+static bool accept_unsigned_callback(const mavlink_status_t *status, uint32_t msgId)
+{
+	// if (status == mavlink_get_channel_status(MAVLINK_COMM_0)) {
+	//     // always accept channel 0, assumed to be secure channel. This
+	//     // is USB on PX4 boards
+	//     return true;
+	// }
+	// for (uint8_t i = 0; i < accept_list_size; i++) {
+	//     if (accept_list[i] == msgId) {
+	//         return true;
+	//     }
+	// }
+	return false;
+}
+
 static void usage();
 
 bool Mavlink::_boot_complete = false;
@@ -216,6 +258,7 @@ Mavlink::Mavlink() :
 	_task_running(false),
 	_mavlink_buffer{},
 	_mavlink_status{},
+	_mavlink_signing{},
 	_hil_enabled(false),
 	_generate_rc(false),
 	_use_hil_gps(false),
@@ -342,6 +385,17 @@ Mavlink::Mavlink() :
 	}
 
 	_rstatus.type = telemetry_status_s::TELEMETRY_STATUS_RADIO_TYPE_GENERIC;
+
+	// set the signing procedure
+	// TODO: implementation key fetch from memory
+	memcpy(_mavlink_signing.secret_key, mavlink_secret_key.secret_key, 32);
+	_mavlink_signing.link_id = _instance_id;
+	_mavlink_signing.timestamp = mavlink_secret_key.timestamp;
+	_mavlink_signing.flags = MAVLINK_SIGNING_FLAG_SIGN_OUTGOING;
+	_mavlink_signing.accept_unsigned_callback = accept_unsigned_callback;
+	// copy pointer of the signing to status struct
+	_mavlink_status.signing = &_mavlink_signing;
+	_mavlink_status.signing_streams = &global_mavlink_signig_streams;
 }
 
 Mavlink::~Mavlink()
