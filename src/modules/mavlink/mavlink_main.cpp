@@ -154,6 +154,24 @@ void mavlink_end_uart_send(mavlink_channel_t chan, int length)
 	}
 }
 
+void mavlink_start_sign_stream(mavlink_channel_t chan)
+{
+	Mavlink *m = Mavlink::get_instance((unsigned)chan);
+
+	if (m != nullptr) {
+		(void)m->begin_signing();
+	}
+}
+
+void mavlink_end_sign_stream(mavlink_channel_t chan)
+{
+	Mavlink *m = Mavlink::get_instance((unsigned)chan);
+
+	if (m != nullptr) {
+		(void)m->end_signing();
+	}
+}
+
 /*
  * Internal function to give access to the channel status for each channel
  */
@@ -263,6 +281,7 @@ Mavlink::Mavlink() :
 	_message_buffer {},
 	_message_buffer_mutex {},
 	_send_mutex {},
+	_signing_mutex {},
 	_param_initialized(false),
 	_broadcast_mode(Mavlink::BROADCAST_MODE_OFF),
 	_param_system_id(PARAM_INVALID),
@@ -997,6 +1016,16 @@ Mavlink::send_packet()
 
 	pthread_mutex_unlock(&_send_mutex);
 	return ret;
+}
+
+void Mavlink::begin_signing()
+{
+	pthread_mutex_lock(&_signing_mutex);
+}
+
+void Mavlink::end_signing()
+{
+	pthread_mutex_unlock(&_signing_mutex);
 }
 
 void
@@ -1928,6 +1957,9 @@ Mavlink::task_main(int argc, char *argv[])
 
 	/* initialize send mutex */
 	pthread_mutex_init(&_send_mutex, nullptr);
+
+	/* initialize signing mutex */
+	pthread_mutex_init(&_signing_mutex, nullptr);
 
 	/* if we are passing on mavlink messages, we need to prepare a buffer for this instance */
 	if (_forwarding_on || _ftp_on) {

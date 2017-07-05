@@ -285,6 +285,9 @@ public:
 	 */
 	int             send_packet();
 
+	void			begin_signing();
+	void			end_signing();
+
 	/**
 	 * Resend message as is, don't change sequence number and CRC.
 	 */
@@ -561,6 +564,7 @@ private:
 
 	pthread_mutex_t		_message_buffer_mutex;
 	pthread_mutex_t		_send_mutex;
+	pthread_mutex_t		_signing_mutex;
 
 	bool			_param_initialized;
 	uint32_t		_broadcast_mode;
