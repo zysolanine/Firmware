@@ -846,18 +846,30 @@ void Ekf2::run()
 			float velocity[3];
 			_ekf.get_velocity(velocity);
 
+			float position[3];
+			_ekf.get_position(position);
+
 			float pos_d_deriv;
 			_ekf.get_pos_d_deriv(&pos_d_deriv);
+
+			float velNE_wind[2];
+			_ekf.get_wind_velocity(velNE_wind);
+
+			// In-run bias estimates
+			float gyro_bias[3];
+			_ekf.get_gyro_bias(gyro_bias);
+			float accel_bias[3];
+			_ekf.get_accel_bias(accel_bias);
 
 			// Calculate wind-compensated velocity in body frame
 			Vector3f v_wind_comp(velocity);
 			matrix::Dcm<float> R_to_body(q.inversed());
-			float velNE_wind[2] = {};
-			_ekf.get_wind_velocity(velNE_wind);
 			v_wind_comp(0) -= velNE_wind[0];
 			v_wind_comp(1) -= velNE_wind[1];
 			_vel_body_wind = R_to_body * v_wind_comp; // TODO : move this elsewhere
-				
+
+			// TODO : publish this as a part of an airdata estimate. There are currently no consumers of this.
+			//
 			// use estimated velocity for airspeed estimate
 			// TODO move this out of the estimators and put it into a dedicated air data consolidation algorithm
 			// if (_airspeed_mode.get() == control_state_s::AIRSPD_MODE_MEAS) {
@@ -895,12 +907,6 @@ void Ekf2::run()
 			// 	}
 			// }
 
-			// In-run bias estimates
-			float gyro_bias[3] = {};
-			_ekf.get_gyro_bias(gyro_bias);
-			float accel_bias[3] = {};
-			_ekf.get_accel_bias(accel_bias);
-
 			{
 				// generate vehicle attitude quaternion data
 				struct vehicle_attitude_s att = {};
@@ -922,69 +928,69 @@ void Ekf2::run()
 				}
 			}
 
-			// generate vehicle local position data
-			struct vehicle_local_position_s lpos = {};
-			float pos[3] = {};
+			{
+				// generate vehicle local position data
+				struct vehicle_local_position_s lpos = {};
 
-			lpos.timestamp = now;
+				lpos.timestamp = now;
 
-			// Position of body origin in local NED frame
-			_ekf.get_position(pos);
-			lpos.x = (_ekf.local_position_is_valid()) ? pos[0] : 0.0f;
-			lpos.y = (_ekf.local_position_is_valid()) ? pos[1] : 0.0f;
-			lpos.z = pos[2];
+				// Position of body origin in local NED frame
+				lpos.x = (_ekf.local_position_is_valid()) ? position[0] : 0.0f;
+				lpos.y = (_ekf.local_position_is_valid()) ? position[1] : 0.0f;
+				lpos.z = position[2];
 
-			// Velocity of body origin in local NED frame (m/s)
-			lpos.vx = velocity[0];
-			lpos.vy = velocity[1];
-			lpos.vz = velocity[2];
-			lpos.z_deriv = pos_d_deriv; // vertical position time derivative (m/s)
+				// Velocity of body origin in local NED frame (m/s)
+				lpos.vx = velocity[0];
+				lpos.vy = velocity[1];
+				lpos.vz = velocity[2];
+				lpos.z_deriv = pos_d_deriv; // vertical position time derivative (m/s)
 
-			// TODO: better status reporting
-			lpos.xy_valid = _ekf.local_position_is_valid() && !_vel_innov_preflt_fail;
-			lpos.z_valid = !_vel_innov_preflt_fail;
-			lpos.v_xy_valid = _ekf.local_position_is_valid() && !_vel_innov_preflt_fail;
-			lpos.v_z_valid = !_vel_innov_preflt_fail;
+				// TODO: better status reporting
+				lpos.xy_valid = _ekf.local_position_is_valid() && !_vel_innov_preflt_fail;
+				lpos.z_valid = !_vel_innov_preflt_fail;
+				lpos.v_xy_valid = _ekf.local_position_is_valid() && !_vel_innov_preflt_fail;
+				lpos.v_z_valid = !_vel_innov_preflt_fail;
 
-			// Position of local NED origin in GPS / WGS84 frame
-			struct map_projection_reference_s ekf_origin = {};
-			// true if position (x,y,z) has a valid WGS-84 global reference (ref_lat, ref_lon, alt)
-			lpos.xy_global = lpos.z_global = _ekf.get_ekf_origin(&lpos.ref_timestamp, &ekf_origin, &lpos.ref_alt);
-			lpos.ref_lat = ekf_origin.lat_rad * 180.0 / M_PI; // Reference point latitude in degrees
-			lpos.ref_lon = ekf_origin.lon_rad * 180.0 / M_PI; // Reference point longitude in degrees
+				// Position of local NED origin in GPS / WGS84 frame
+				struct map_projection_reference_s ekf_origin = {};
+				// true if position (x,y,z) has a valid WGS-84 global reference (ref_lat, ref_lon, alt)
+				lpos.xy_global = lpos.z_global = _ekf.get_ekf_origin(&lpos.ref_timestamp, &ekf_origin, &lpos.ref_alt);
+				lpos.ref_lat = ekf_origin.lat_rad * 180.0 / M_PI; // Reference point latitude in degrees
+				lpos.ref_lon = ekf_origin.lon_rad * 180.0 / M_PI; // Reference point longitude in degrees
 
-			// The rotation of the tangent plane vs. geographical north
-			matrix::Eulerf euler(q);
-			lpos.yaw = euler.psi();
+				// The rotation of the tangent plane vs. geographical north
+				matrix::Eulerf euler(q);
+				lpos.yaw = euler.psi();
 
-			float terrain_vpos;
-			lpos.dist_bottom_valid = _ekf.get_terrain_valid();
-			_ekf.get_terrain_vert_pos(&terrain_vpos);
-			lpos.dist_bottom = terrain_vpos - pos[2]; // Distance to bottom surface (ground) in meters
+				float terrain_vpos;
+				lpos.dist_bottom_valid = _ekf.get_terrain_valid();
+				_ekf.get_terrain_vert_pos(&terrain_vpos);
+				lpos.dist_bottom = terrain_vpos - position[2]; // Distance to bottom surface (ground) in meters
 
-			// constrain the distance to ground to _params->rng_gnd_clearance
-			if (lpos.dist_bottom < _params->rng_gnd_clearance) {
-				lpos.dist_bottom = _params->rng_gnd_clearance;
-			}
+				// constrain the distance to ground to _params->rng_gnd_clearance
+				if (lpos.dist_bottom < _params->rng_gnd_clearance) {
+					lpos.dist_bottom = _params->rng_gnd_clearance;
+				}
 
-			lpos.dist_bottom_rate = -velocity[2]; // Distance to bottom surface (ground) change rate
+				lpos.dist_bottom_rate = -velocity[2]; // Distance to bottom surface (ground) change rate
 
-			bool dead_reckoning;
-			_ekf.get_ekf_lpos_accuracy(&lpos.eph, &lpos.epv, &dead_reckoning);
-			_ekf.get_ekf_vel_accuracy(&lpos.evh, &lpos.evv, &dead_reckoning);
+				bool dead_reckoning;
+				_ekf.get_ekf_lpos_accuracy(&lpos.eph, &lpos.epv, &dead_reckoning);
+				_ekf.get_ekf_vel_accuracy(&lpos.evh, &lpos.evv, &dead_reckoning);
 
-			// get state reset information of position and velocity
-			_ekf.get_posD_reset(&lpos.delta_z, &lpos.z_reset_counter);
-			_ekf.get_velD_reset(&lpos.delta_vz, &lpos.vz_reset_counter);
-			_ekf.get_posNE_reset(&lpos.delta_xy[0], &lpos.xy_reset_counter);
-			_ekf.get_velNE_reset(&lpos.delta_vxy[0], &lpos.vxy_reset_counter);
+				// get state reset information of position and velocity
+				_ekf.get_posD_reset(&lpos.delta_z, &lpos.z_reset_counter);
+				_ekf.get_velD_reset(&lpos.delta_vz, &lpos.vz_reset_counter);
+				_ekf.get_posNE_reset(&lpos.delta_xy[0], &lpos.xy_reset_counter);
+				_ekf.get_velNE_reset(&lpos.delta_vxy[0], &lpos.vxy_reset_counter);
 
-			// publish vehicle local position data
-			if (_lpos_pub == nullptr) {
-				_lpos_pub = orb_advertise(ORB_ID(vehicle_local_position), &lpos);
+				// publish vehicle local position data
+				if (_lpos_pub == nullptr) {
+					_lpos_pub = orb_advertise(ORB_ID(vehicle_local_position), &lpos);
 
-			} else {
-				orb_publish(ORB_ID(vehicle_local_position), _lpos_pub, &lpos);
+				} else {
+					orb_publish(ORB_ID(vehicle_local_position), _lpos_pub, &lpos);
+				}
 			}
 
 			if (_ekf.global_position_is_valid() && !_vel_innov_preflt_fail) {
@@ -1003,7 +1009,7 @@ void Ekf2::run()
 				global_pos.delta_lat_lon[1] = est_lon - lon_pre_reset;
 				global_pos.lat_lon_reset_counter = lpos.xy_reset_counter;
 
-				global_pos.alt = -pos[2] + lpos.ref_alt; // Altitude AMSL in meters
+				global_pos.alt = -position[2] + lpos.ref_alt; // Altitude AMSL in meters
 				_ekf.get_posD_reset(&global_pos.delta_alt, &global_pos.alt_reset_counter);
 				// global altitude has opposite sign of local down position
 				global_pos.delta_alt *= -1.0f;
@@ -1192,7 +1198,7 @@ void Ekf2::run()
 					}
 				}
 
-				// Publish wind estimate
+				// Publish wind estimate  TODO : don't access states directly
 				struct wind_estimate_s wind_estimate = {};
 				wind_estimate.timestamp = now;
 				wind_estimate.windspeed_north = status.states[22];
